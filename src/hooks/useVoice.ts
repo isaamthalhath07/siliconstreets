@@ -13,7 +13,23 @@ import {
   type VoiceSignalMsg, type VoicePresenceMsg,
 } from '@/server/protocol';
 
-const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const ICE = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    {
+      urls: process.env.NEXT_PUBLIC_TURN_URL
+        ? [process.env.NEXT_PUBLIC_TURN_URL]
+        : [
+            'turn:openrelay.metered.ca:80',
+            'turn:openrelay.metered.ca:443',
+            'turn:openrelay.metered.ca:443?transport=tcp',
+          ],
+      username: process.env.NEXT_PUBLIC_TURN_USERNAME || 'openrelayproject',
+      credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL || 'openrelayproject',
+    },
+  ],
+};
 
 export type LinkState = RTCPeerConnectionState | 'idle';
 
@@ -66,6 +82,7 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
     p.audio.srcObject = null;
     p.audio.remove(); // detach the hidden <audio> from the DOM
     peers.current.delete(id);
+    earlyCandidates.current.delete(id);
     setLink(id, 'idle');
   }, []);
 
@@ -127,7 +144,7 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
             ...(earlyCandidates.current.get(m.from)?.splice(0) ?? []),
           ];
           for (const c of buffered) {
-            await peer.pc.addIceCandidate(c).catch(() => undefined);
+            await peer.pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => undefined);
           }
           if (data.sdp.type === 'offer') {
             const ans = await peer.pc.createAnswer();
@@ -145,13 +162,13 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
           }
           // Only addable once a remote description exists; otherwise buffer it.
           if (peer.pc.remoteDescription && peer.pc.remoteDescription.type) {
-            await peer.pc.addIceCandidate(data.candidate);
+            await peer.pc.addIceCandidate(new RTCIceCandidate(data.candidate));
           } else {
             peer.pendingCandidates.push(data.candidate);
           }
         }
-      } catch {
-        /* transient negotiation races are recoverable; ignore */
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'WebRTC signaling error');
       }
     };
 
