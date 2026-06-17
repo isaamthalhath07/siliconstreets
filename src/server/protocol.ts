@@ -13,12 +13,18 @@ export const C2S = {
   SetReady: 'lobby:ready',
   StartGame: 'lobby:start',
   GameAction: 'game:action',
+  Chat: 'chat:send',          // text chat message
+  Voice: 'voice:signal',      // WebRTC signaling relay (offer/answer/ICE)
+  VoicePresence: 'voice:set', // announce mic on/off
 } as const;
 
 export const S2C = {
   Joined: 'lobby:joined',     // private ack to the joining socket
   LobbyUpdate: 'lobby:update', // room-wide roster/ready broadcast
   GameState: 'game:state',     // authoritative snapshot + hash (atomic transition)
+  Chat: 'chat:msg',           // broadcast chat line
+  Voice: 'voice:signal',      // relayed WebRTC signal (clients filter by `to`)
+  VoicePresence: 'voice:set', // a peer toggled their mic
   Error: 'error',
 } as const;
 
@@ -58,6 +64,29 @@ export interface GameStateMsg {
 export interface ErrorMsg {
   code: 'BAD_REQUEST' | 'NOT_FOUND' | 'FORBIDDEN' | 'RULE_VIOLATION' | 'CONFLICT';
   message: string;
+}
+
+// --- chat + voice (relay only — never touch the game engine) ---------------
+
+export interface ChatSendReq { text: string }
+export interface ChatMsg {
+  playerId: PlayerId;
+  name: string;
+  text: string;
+  ts: number;
+}
+
+/** WebRTC signaling envelope. The server relays `data` verbatim from `from`
+ *  to the room; the addressed peer (`to`) consumes it, others ignore it. */
+export interface VoiceSignalReq { to: PlayerId; data: unknown }
+export interface VoiceSignalMsg { from: PlayerId; to: PlayerId; data: unknown }
+
+/** A peer toggling their microphone on/off, broadcast for presence indicators. */
+export interface VoicePresenceReq { active: boolean }
+export interface VoicePresenceMsg {
+  playerId: PlayerId;
+  name: string;
+  active: boolean;
 }
 
 export type ClientAction = GameAction; // re-export for the gateway boundary

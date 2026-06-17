@@ -104,6 +104,11 @@ export class RoomManager {
     return { roomId: ref.roomId };
   }
 
+  /** Display name for a seated player, or null if unknown. */
+  memberName(roomId: string, playerId: PlayerId): string | null {
+    return this.rooms.get(roomId)?.members.get(playerId)?.name ?? null;
+  }
+
   lobbyView(roomId: string): LobbyUpdateMsg | null {
     const room = this.rooms.get(roomId);
     if (!room) return null;

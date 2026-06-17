@@ -31,8 +31,8 @@ export default function Board({ state, optimistic }: BoardProps) {
   return (
     <div className="mx-auto aspect-square w-full max-w-[min(92vw,82vh)]">
       <div
-        className={`grid h-full w-full gap-[2px] rounded-md border border-term-line bg-term-bg p-[2px] transition-opacity ${
-          optimistic ? 'opacity-80' : 'opacity-100'
+        className={`glass grid h-full w-full gap-[3px] rounded-2xl p-[3px] transition-opacity ${
+          optimistic ? 'opacity-75' : 'opacity-100'
         }`}
         style={{ gridTemplateColumns: 'repeat(11,1fr)', gridTemplateRows: 'repeat(11,1fr)' }}
       >
@@ -53,14 +53,17 @@ export default function Board({ state, optimistic }: BoardProps) {
 
         {/* Interior HUD (9x9 center) */}
         <div
-          className="flex flex-col items-center justify-center gap-1 rounded bg-term-panel/40"
+          className="flex flex-col items-center justify-center gap-1 rounded-xl border border-white/5 bg-black/20"
           style={{ gridRow: '2 / 11', gridColumn: '2 / 11' }}
         >
-          <h1 className="neon-text text-2xl font-bold tracking-[0.3em] text-matrix sm:text-4xl">
+          <h1 className="holo-text animate-float text-3xl font-extrabold tracking-[0.3em] sm:text-5xl">
             SILICON
           </h1>
-          <h1 className="text-2xl font-bold tracking-[0.3em] text-cyber sm:text-4xl">STREETS</h1>
-          <p className="mt-2 text-[10px] uppercase tracking-widest text-term-dim">
+          <h1 className="text-3xl font-extrabold tracking-[0.3em] text-term-text/90 sm:text-5xl">
+            STREETS
+          </h1>
+          <p className="mt-3 flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-term-dim">
+            <span className={`h-1.5 w-1.5 rounded-full ${optimistic ? 'animate-pulse bg-cyber' : 'bg-matrix'}`} />
             {optimistic ? 'syncing…' : `state ${state.stateHash}`}
           </p>
         </div>

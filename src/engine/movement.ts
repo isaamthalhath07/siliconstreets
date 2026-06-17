@@ -3,6 +3,7 @@
 // human-readable event strings the server can stream to clients.
 
 import { GameState, Player, Property, TileType } from './types';
+import { isOwnable } from './types';
 import {
   BOARD,
   BOARD_SIZE,
@@ -87,6 +88,29 @@ export function advanceTurn(state: GameState): void {
   state.phase = 'AWAIT_ROLL';
 }
 
+/** Open an auction for the tile the active player is standing on. Used both when
+ *  a player DECLINEs a purchase and when they land on a tile they cannot afford.
+ *  Every solvent player joins; the lander bids first. With no eligible bidders
+ *  the turn simply resolves (no sale). */
+export function startAuction(state: GameState, events: string[]): void {
+  const tile = active(state).position;
+  const def = BOARD[tile];
+  if (!isOwnable(def) || state.boardState[tile].ownerId) {
+    return setPostActionPhase(state); // nothing to auction
+  }
+  const bidders = state.playerOrder.filter((id) => !state.players[id].isBankrupt);
+  if (bidders.length === 0) return setPostActionPhase(state);
+  state.auction = {
+    tile,
+    currentBid: 0,
+    highBidderId: null,
+    activeBidders: bidders,
+    bidTurnId: bidders.includes(state.activePlayerId) ? state.activePlayerId : bidders[0],
+  };
+  state.phase = 'AUCTION';
+  events.push(`${def.name} goes to auction — opening bids`);
+}
+
 function resolveLanding(
   state: GameState,
   player: Player,
@@ -104,7 +128,8 @@ function resolveLanding(
           state.phase = 'AWAIT_ACTION';
           events.push(`${tile.name} is unclaimed — buy or decline`);
         } else {
-          events.push(`${tile.name} unclaimed but unaffordable (auction pending)`);
+          events.push(`${tile.name} unclaimed but unaffordable for ${player.name}`);
+          startAuction(state, events);
         }
         return;
       }
@@ -142,5 +167,8 @@ export function moveAndResolve(state: GameState, steps: number, events: string[]
   }
   player.position = (from + steps) % BOARD_SIZE;
   resolveLanding(state, player, steps, events);
-  if (state.phase !== 'AWAIT_ACTION') setPostActionPhase(state);
+  // AWAIT_ACTION (buy decision) and AUCTION both pause the turn until resolved.
+  if (state.phase !== 'AWAIT_ACTION' && state.phase !== 'AUCTION') {
+    setPostActionPhase(state);
+  }
 }

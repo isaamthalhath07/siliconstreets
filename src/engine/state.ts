@@ -52,6 +52,7 @@ export function createGame(
     players,
     boardState,
     lastRoll: null,
+    auction: null,
     doublesCount: 0,
     rngState: seed ?? seedFromString(gameId),
     turnHistory: [],

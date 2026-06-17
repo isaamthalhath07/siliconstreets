@@ -46,6 +46,10 @@ function choosePassive(s: GameState): GameAction | null {
       return { type: 'BUY_PROPERTY', playerId: pid, tile: s.players[pid].position };
     case 'RESOLVED':
       return { type: 'END_TURN', playerId: pid };
+    case 'AUCTION':
+      // Whoever's turn it is to bid simply passes, so auctions resolve (no sale)
+      // and the autopilot keeps moving — still fully deterministic.
+      return { type: 'PASS_BID', playerId: s.auction!.bidTurnId };
     default:
       return null;
   }
@@ -193,6 +197,36 @@ function grant(s: GameState, owner: PlayerId, tiles: number[], dev = 0): void {
     check('bankruptcy: creditor p2 received remaining cash (100)', f.players['p2'].balance === p2Before + 100);
     check('bankruptcy: game over, p2 last solvent', f.phase === 'GAME_OVER' && f.activePlayerId === 'p2');
   }
+}
+
+// --- 2d. Auction: decline → bid → opponent passes → award ------------------
+{
+  let s = createGame('game-1', DUO, 1); // active = p1
+  s.phase = 'AWAIT_ACTION';
+  s.players['p1'].position = 6; // Linux Kernel (unowned, cost 100)
+
+  const d = applyAction(s, { type: 'DECLINE_PROPERTY', playerId: 'p1', tile: 6 });
+  check('auction: decline opens an auction', d.ok === true && d.state.phase === 'AUCTION', d.ok ? '' : d.error);
+  if (d.ok) s = d.state;
+  check('auction: lander bids first', s.auction?.bidTurnId === 'p1');
+
+  const oot = applyAction(s, { type: 'PLACE_BID', playerId: 'p2', tile: 6, amount: 10 });
+  check('auction: out-of-turn bid rejected', oot.ok === false);
+
+  const b1 = applyAction(s, { type: 'PLACE_BID', playerId: 'p1', tile: 6, amount: 50 });
+  check('auction: in-turn bid accepted', b1.ok === true, b1.ok ? '' : b1.error);
+  if (b1.ok) s = b1.state;
+  check('auction: turn passes to p2', s.auction?.bidTurnId === 'p2' && s.auction?.highBidderId === 'p1');
+
+  const low = applyAction(s, { type: 'PLACE_BID', playerId: 'p2', tile: 6, amount: 50 });
+  check('auction: non-increasing bid rejected', low.ok === false);
+
+  const p2pass = applyAction(s, { type: 'PASS_BID', playerId: 'p2' });
+  check('auction: last opponent pass awards the high bidder', p2pass.ok === true, p2pass.ok ? '' : p2pass.error);
+  if (p2pass.ok) s = p2pass.state;
+  check('auction: winner owns the tile', s.boardState[6].ownerId === 'p1');
+  check('auction: winner charged the bid (1500-50)', s.players['p1'].balance === 1450);
+  check('auction: auction cleared and turn resumed', s.auction === null && s.phase !== 'AUCTION');
 }
 
 console.log(

@@ -17,6 +17,8 @@ import {
 const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL ?? 'http://localhost:3001';
 
 export interface UseGame {
+  /** Live socket, exposed so chat/voice hooks can share the one connection. */
+  socket: Socket | null;
   connected: boolean;
   me: string | null;
   roomId: string | null;
@@ -37,6 +39,7 @@ export function useGameState(): UseGame {
   const authRef = useRef<GameStateMsg | null>(null); // last server-confirmed snapshot
   const meRef = useRef<string | null>(null);
 
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [me, setMe] = useState<string | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
@@ -48,6 +51,7 @@ export function useGameState(): UseGame {
   useEffect(() => {
     const socket = io(SERVER_URL, { transports: ['websocket'] });
     socketRef.current = socket;
+    setSocket(socket);
 
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
@@ -104,7 +108,7 @@ export function useGameState(): UseGame {
   }, []);
 
   return {
-    connected, me, roomId, lobby, snapshot, optimistic, error,
+    socket, connected, me, roomId, lobby, snapshot, optimistic, error,
     createRoom, joinRoom, setReady, start, dispatch,
   };
 }

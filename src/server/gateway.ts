@@ -8,6 +8,7 @@ import { RoomManager } from './RoomManager';
 import {
   C2S, S2C, SocketLike, ServerLike,
   JoinRoomReq, SetReadyReq, ErrorMsg,
+  ChatMsg, VoiceSignalMsg, VoicePresenceMsg,
 } from './protocol';
 
 const asObj = (p: unknown): Record<string, unknown> | null =>
@@ -76,6 +77,41 @@ export function connectGateway(io: ServerLike, manager: RoomManager): void {
       const res = manager.dispatch(ctx.roomId, stamped);
       if (!res.ok) return fail(socket, 'RULE_VIOLATION', res.error);
       io.to(ctx.roomId).emit(S2C.GameState, res.message);
+    });
+
+    // --- text chat: validate, stamp identity server-side, broadcast --------
+    socket.on(C2S.Chat, (payload) => {
+      const ctx = ctxOf(socket);
+      if (!ctx) return fail(socket, 'FORBIDDEN', 'join a room first');
+      const raw = str(asObj(payload)?.text)?.trim();
+      if (!raw) return fail(socket, 'BAD_REQUEST', 'empty message');
+      const text = raw.slice(0, 500); // clamp
+      const name = manager.memberName(ctx.roomId, ctx.playerId) ?? 'unknown';
+      const msg: ChatMsg = { playerId: ctx.playerId, name, text, ts: Date.now() };
+      io.to(ctx.roomId).emit(S2C.Chat, msg);
+    });
+
+    // --- voice signaling: relay verbatim to the room (peers filter by `to`) -
+    socket.on(C2S.Voice, (payload) => {
+      const ctx = ctxOf(socket);
+      if (!ctx) return fail(socket, 'FORBIDDEN', 'join a room first');
+      const body = asObj(payload);
+      const to = str(body?.to);
+      if (!to) return fail(socket, 'BAD_REQUEST', 'signal needs a target');
+      const out: VoiceSignalMsg = { from: ctx.playerId, to, data: body?.data };
+      io.to(ctx.roomId).emit(S2C.Voice, out);
+    });
+
+    socket.on(C2S.VoicePresence, (payload) => {
+      const ctx = ctxOf(socket);
+      if (!ctx) return fail(socket, 'FORBIDDEN', 'join a room first');
+      const name = manager.memberName(ctx.roomId, ctx.playerId) ?? 'unknown';
+      const out: VoicePresenceMsg = {
+        playerId: ctx.playerId,
+        name,
+        active: asObj(payload)?.active === true,
+      };
+      io.to(ctx.roomId).emit(S2C.VoicePresence, out);
     });
 
     socket.on('disconnect', () => {

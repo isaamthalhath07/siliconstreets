@@ -124,6 +124,21 @@ export interface DiceRoll {
   readonly isDouble: boolean;
 }
 
+/** Live state of a property auction. Present only while phase === 'AUCTION'.
+ *  Turn-based: exactly one bidder (`bidTurnId`) may act at a time, so the flow
+ *  stays deterministic and replayable like every other action. */
+export interface AuctionState {
+  /** Board index of the tile under the hammer. */
+  readonly tile: TileIndex;
+  /** Highest bid so far; 0 until the first PLACE_BID. */
+  currentBid: number;
+  highBidderId: PlayerId | null;
+  /** Players still in the running, in playerOrder; shrinks as they PASS_BID. */
+  activeBidders: PlayerId[];
+  /** Whose turn it is to bid or pass. */
+  bidTurnId: PlayerId;
+}
+
 /** One immutable entry appended per applied action (audit + replay). */
 export interface TurnRecord {
   readonly seq: number;
@@ -143,6 +158,8 @@ export interface GameState {
   /** Length-40, parallel to BOARD. */
   boardState: TileState[];
   lastRoll: DiceRoll | null;
+  /** Active auction, or null. Non-null iff phase === 'AUCTION'. */
+  auction: AuctionState | null;
   /** Consecutive doubles this turn; 3 => Quarantine. */
   doublesCount: number;
   /** Pure PRNG cursor. Advanced on every dice roll; makes games replayable. */
@@ -165,6 +182,7 @@ export type GameAction =
   | (ActionBase & { type: 'BUY_PROPERTY'; tile: TileIndex })
   | (ActionBase & { type: 'DECLINE_PROPERTY'; tile: TileIndex }) // -> AUCTION
   | (ActionBase & { type: 'PLACE_BID'; tile: TileIndex; amount: number })
+  | (ActionBase & { type: 'PASS_BID' })
   | (ActionBase & { type: 'BUILD'; tile: TileIndex })
   | (ActionBase & { type: 'SELL_BUILDING'; tile: TileIndex })
   | (ActionBase & { type: 'MORTGAGE'; tile: TileIndex })

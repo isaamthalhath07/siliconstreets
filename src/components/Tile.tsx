@@ -42,11 +42,15 @@ export default function Tile({ tile, ts, ownerColor, tokens, style }: TileProps)
 
   return (
     <div
-      style={{ ...style, borderColor: ownerColor ?? '#1b2733' }}
-      className="relative flex flex-col items-center justify-center overflow-hidden border bg-term-panel/80 p-0.5 text-center"
+      style={{
+        ...style,
+        borderColor: ownerColor ?? 'rgba(255,255,255,0.08)',
+        boxShadow: ownerColor ? `inset 0 0 10px ${ownerColor}55` : undefined,
+      }}
+      className="relative flex flex-col items-center justify-center overflow-hidden rounded-[5px] border bg-white/[0.03] p-0.5 text-center backdrop-blur-sm transition-colors hover:bg-white/[0.07]"
     >
       {isOwnable(tile) && (
-        <span className={`absolute ${BAR_SIDE[edgeOf(tile.index)]}`} style={{ background: SECTOR_COLOR[tile.sector] }} />
+        <span className={`absolute ${BAR_SIDE[edgeOf(tile.index)]}`} style={{ background: SECTOR_COLOR[tile.sector], boxShadow: `0 0 6px ${SECTOR_COLOR[tile.sector]}` }} />
       )}
 
       {!isOwnable(tile) && (

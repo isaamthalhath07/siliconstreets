@@ -17,18 +17,16 @@ import { isOwnable } from './types';
 import { rollDice } from './dice';
 import { hashState } from './hash';
 import { deepClone } from './clone';
+import { RuleError, fail } from './errors';
 import {
   advanceTurn,
   moveAndResolve,
   sendToQuarantine,
   setPostActionPhase,
+  startAuction,
   transfer,
 } from './movement';
-
-class RuleError extends Error {}
-const fail = (msg: string): never => {
-  throw new RuleError(msg);
-};
+import { placeBid, passBid } from './auction';
 
 const active = (s: GameState): Player => s.players[s.activePlayerId];
 
@@ -76,7 +74,8 @@ function route(s: GameState, a: GameAction, ev: string[]): void {
     case 'PAY_BAIL': return bailAction(s, ev);
     case 'END_TURN': return endTurnAction(s);
     case 'DECLARE_BANKRUPTCY': return bankruptcyAction(s, ev);
-    case 'PLACE_BID':
+    case 'PLACE_BID': return placeBid(s, a.playerId, a.amount, ev);
+    case 'PASS_BID': return passBid(s, a.playerId, ev);
     case 'PROPOSE_TRADE':
     case 'RESOLVE_TRADE':
       return fail(`${a.type} not yet implemented`);
@@ -144,8 +143,8 @@ function buyAction(s: GameState, tileIdx: number, ev: string[]): void {
 
 function declineAction(s: GameState, ev: string[]): void {
   if (s.phase !== 'AWAIT_ACTION') fail('nothing to decline');
-  ev.push(`${active(s).name} declined to buy (auction not yet wired)`);
-  setPostActionPhase(s);
+  ev.push(`${active(s).name} declined to buy ${BOARD[active(s).position].name}`);
+  startAuction(s, ev);
 }
 
 // --- property management (allowed in AWAIT_ROLL or RESOLVED) ----------------
