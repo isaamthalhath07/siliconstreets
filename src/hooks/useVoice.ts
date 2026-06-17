@@ -45,6 +45,7 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
   const [error, setError] = useState<string | null>(null);
 
   const peers = useRef<Map<string, Peer>>(new Map());
+  const earlyCandidates = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const stream = useRef<MediaStream | null>(null);
   const meRef = useRef(me);
   meRef.current = me;
@@ -87,7 +88,7 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
         void audio.play().catch(() => undefined);
       };
       pc.onicecandidate = (e) => {
-        if (e.candidate) socket.emit(C2S.Voice, { to: id, data: { candidate: e.candidate } });
+        if (e.candidate) socket.emit(C2S.Voice, { to: id, data: { candidate: e.candidate.toJSON() } });
       };
       pc.onconnectionstatechange = () => setLink(id, pc.connectionState);
       const peer: Peer = { pc, audio, pendingCandidates: [] };
@@ -96,8 +97,8 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
       if (initiator) {
         void pc
           .createOffer()
-          .then((o) => pc.setLocalDescription(o))
-          .then(() => socket.emit(C2S.Voice, { to: id, data: { sdp: pc.localDescription } }))
+          .then((o) => pc.setLocalDescription(o).then(() => o))
+          .then((o) => socket.emit(C2S.Voice, { to: id, data: { sdp: { type: o.type, sdp: o.sdp } } }))
           .catch(() => undefined);
       }
       return peer;
@@ -121,18 +122,27 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
           if (!peer) return;
           await peer.pc.setRemoteDescription(data.sdp);
           // Remote description is set — drain any candidates that raced ahead.
-          const buffered = peer.pendingCandidates.splice(0);
+          const buffered = [
+            ...peer.pendingCandidates.splice(0),
+            ...(earlyCandidates.current.get(m.from)?.splice(0) ?? []),
+          ];
           for (const c of buffered) {
             await peer.pc.addIceCandidate(c).catch(() => undefined);
           }
           if (data.sdp.type === 'offer') {
             const ans = await peer.pc.createAnswer();
             await peer.pc.setLocalDescription(ans);
-            socket.emit(C2S.Voice, { to: m.from, data: { sdp: peer.pc.localDescription } });
+            socket.emit(C2S.Voice, { to: m.from, data: { sdp: { type: ans.type, sdp: ans.sdp } } });
           }
         } else if (data.candidate) {
           const peer = peers.current.get(m.from);
-          if (!peer) return;
+          if (!peer) {
+            if (!earlyCandidates.current.has(m.from)) {
+              earlyCandidates.current.set(m.from, []);
+            }
+            earlyCandidates.current.get(m.from)!.push(data.candidate);
+            return;
+          }
           // Only addable once a remote description exists; otherwise buffer it.
           if (peer.pc.remoteDescription && peer.pc.remoteDescription.type) {
             await peer.pc.addIceCandidate(data.candidate);
