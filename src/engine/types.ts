@@ -139,6 +139,19 @@ export interface AuctionState {
   bidTurnId: PlayerId;
 }
 
+/** A pending trade offer. Created by the active player (`from`) on their turn;
+ *  the counterparty (`to`) accepts or rejects, or the proposer withdraws. At
+ *  most one is open at a time, and it expires when the proposer's turn ends. */
+export interface TradeState {
+  readonly id: string;
+  readonly from: PlayerId;          // proposer (active player at proposal time)
+  readonly to: PlayerId;            // counterparty
+  readonly offerTiles: TileIndex[]; // deeds `from` gives up
+  readonly offerCash: number;       // cash `from` pays `to`
+  readonly wantTiles: TileIndex[];  // deeds `to` gives up
+  readonly wantCash: number;        // cash `to` pays `from`
+}
+
 /** One immutable entry appended per applied action (audit + replay). */
 export interface TurnRecord {
   readonly seq: number;
@@ -148,8 +161,18 @@ export interface TurnRecord {
   readonly timestamp: number;
 }
 
+/** Host-chosen rules toggled at lobby setup. Part of the initial state (and the
+ *  hash), so a game's configuration is itself deterministic and replayable. */
+export interface GameConfig {
+  /** When false, declining / landing-unaffordable leaves the tile unsold
+   *  instead of opening an auction. */
+  readonly auctionsEnabled: boolean;
+}
+
 export interface GameState {
   readonly gameId: string;
+  /** Immutable per-game rules chosen in the lobby. */
+  readonly auctionsEnabled: boolean;
   phase: GamePhase;
   /** Authoritative turn order; activePlayerId must be a member. */
   readonly playerOrder: PlayerId[];
@@ -160,6 +183,8 @@ export interface GameState {
   lastRoll: DiceRoll | null;
   /** Active auction, or null. Non-null iff phase === 'AUCTION'. */
   auction: AuctionState | null;
+  /** Open trade offer awaiting the counterparty's decision, or null. */
+  pendingTrade: TradeState | null;
   /** Consecutive doubles this turn; 3 => Quarantine. */
   doublesCount: number;
   /** Pure PRNG cursor. Advanced on every dice roll; makes games replayable. */

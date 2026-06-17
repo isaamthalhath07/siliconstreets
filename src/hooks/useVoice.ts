@@ -60,6 +60,7 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
     p.pc.onconnectionstatechange = null;
     p.pc.close();
     p.audio.srcObject = null;
+    p.audio.remove(); // detach the hidden <audio> from the DOM
     peers.current.delete(id);
     setLink(id, 'idle');
   }, []);
@@ -71,10 +72,15 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
       }
       const pc = new RTCPeerConnection(ICE);
       stream.current.getTracks().forEach((t) => pc.addTrack(t, stream.current!));
-      const audio = new Audio();
+      // Remote audio must be attached to the DOM to play reliably under browser
+      // autoplay policies; a detached `new Audio()` is silently muted.
+      const audio = document.createElement('audio');
       audio.autoplay = true;
+      audio.setAttribute('playsinline', 'true');
+      audio.style.display = 'none';
+      document.body.appendChild(audio);
       pc.ontrack = (e) => {
-        audio.srcObject = e.streams[0];
+        audio.srcObject = e.streams[0] ?? new MediaStream([e.track]);
         void audio.play().catch(() => undefined);
       };
       pc.onicecandidate = (e) => {
@@ -175,7 +181,10 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
   // Tear everything down on unmount.
   useEffect(() => {
     return () => {
-      peers.current.forEach((p) => p.pc.close());
+      peers.current.forEach((p) => {
+        p.pc.close();
+        p.audio.remove();
+      });
       peers.current.clear();
       stream.current?.getTracks().forEach((t) => t.stop());
     };

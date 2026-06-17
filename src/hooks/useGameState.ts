@@ -11,7 +11,7 @@ import { applyAction } from '@/engine/reducer';
 import type { GameAction, PlayerAction } from '@/engine/types';
 import {
   C2S, S2C,
-  type GameStateMsg, type JoinedRes, type LobbyUpdateMsg, type ErrorMsg,
+  type GameStateMsg, type JoinedRes, type LobbyUpdateMsg, type ErrorMsg, type KickedMsg,
 } from '@/server/protocol';
 
 const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL ?? 'http://localhost:3001';
@@ -26,9 +26,13 @@ export interface UseGame {
   snapshot: GameStateMsg | null;
   optimistic: boolean;
   error: string | null;
-  createRoom: (name: string) => void;
+  createRoom: (name: string, opts?: { maxPlayers?: number; auctionsEnabled?: boolean }) => void;
   joinRoom: (roomId: string, name: string) => void;
   setReady: (ready: boolean) => void;
+  /** Host: add an AI player to fill a seat. */
+  addBot: () => void;
+  /** Host: remove a previously added bot. */
+  removeBot: (botId: string) => void;
   start: () => void;
   /** Submit an action; playerId is stamped server-side, so omit it here. */
   dispatch: (action: PlayerAction) => void;
@@ -71,8 +75,31 @@ export function useGameState(): UseGame {
       if (authRef.current) setSnapshot(authRef.current); // roll back optimism
       setOptimistic(false);
     });
+    socket.on(S2C.Kicked, (m: KickedMsg) => {
+      if (m.playerId !== meRef.current) return; // someone else left the roster
+      authRef.current = null;
+      meRef.current = null;
+      setMe(null);
+      setRoomId(null);
+      setSnapshot(null);
+      setError('You were removed from the lobby for inactivity.');
+    });
+
+    // Liveness: emit a throttled heartbeat on real user activity so present-but-
+    // quiet players aren't swept, while genuinely abandoned tabs time out.
+    let lastPing = 0;
+    const ping = (): void => {
+      const now = Date.now();
+      if (now - lastPing > 15_000) {
+        lastPing = now;
+        socket.emit(C2S.Heartbeat);
+      }
+    };
+    const activity = ['mousemove', 'keydown', 'click', 'touchstart'];
+    activity.forEach((e) => window.addEventListener(e, ping, { passive: true }));
 
     return () => {
+      activity.forEach((e) => window.removeEventListener(e, ping));
       socket.close();
     };
   }, []);
@@ -81,9 +108,15 @@ export function useGameState(): UseGame {
     socketRef.current?.emit(event, payload);
   };
 
-  const createRoom = useCallback((name: string) => emit(C2S.CreateRoom, { name }), []);
+  const createRoom = useCallback(
+    (name: string, opts?: { maxPlayers?: number; auctionsEnabled?: boolean }) =>
+      emit(C2S.CreateRoom, { name, ...opts }),
+    [],
+  );
   const joinRoom = useCallback((id: string, name: string) => emit(C2S.JoinRoom, { roomId: id, name }), []);
   const setReady = useCallback((ready: boolean) => emit(C2S.SetReady, { ready }), []);
+  const addBot = useCallback(() => emit(C2S.AddBot), []);
+  const removeBot = useCallback((botId: string) => emit(C2S.RemoveBot, { botId }), []);
   const start = useCallback(() => emit(C2S.StartGame), []);
 
   const dispatch = useCallback((partial: PlayerAction) => {
@@ -109,6 +142,6 @@ export function useGameState(): UseGame {
 
   return {
     socket, connected, me, roomId, lobby, snapshot, optimistic, error,
-    createRoom, joinRoom, setReady, start, dispatch,
+    createRoom, joinRoom, setReady, addBot, removeBot, start, dispatch,
   };
 }

@@ -49,12 +49,23 @@ export default {
           '0%': { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' },
         },
+        bob: {
+          '0%,100%': { transform: 'translateZ(14px) rotateX(-17deg) translateY(0)' },
+          '50%': { transform: 'translateZ(14px) rotateX(-17deg) translateY(-3px)' },
+        },
+        landpop: {
+          '0%': { transform: 'scale(0.6)' },
+          '60%': { transform: 'scale(1.18)' },
+          '100%': { transform: 'scale(1)' },
+        },
       },
       animation: {
         aurora: 'aurora 18s ease-in-out infinite',
         float: 'float 4s ease-in-out infinite',
         ring: 'ring 1.6s ease-out infinite',
         shimmer: 'shimmer 2.5s linear infinite',
+        bob: 'bob 2.2s ease-in-out infinite',
+        landpop: 'landpop 0.35s ease-out',
       },
     },
   },

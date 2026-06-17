@@ -10,6 +10,7 @@ import { createGame } from '../state';
 import { applyAction } from '../reducer';
 import { calculateRent } from '../rent';
 import { rollDice } from '../dice';
+import { nextBotAction } from '../bot';
 import { GameAction, GameState, PlayerId } from '../types';
 
 declare const process: { exit(code: number): never };
@@ -227,6 +228,108 @@ function grant(s: GameState, owner: PlayerId, tiles: number[], dev = 0): void {
   check('auction: winner owns the tile', s.boardState[6].ownerId === 'p1');
   check('auction: winner charged the bid (1500-50)', s.players['p1'].balance === 1450);
   check('auction: auction cleared and turn resumed', s.auction === null && s.phase !== 'AUCTION');
+}
+
+// --- 2e. Trade: propose → counterparty accepts → deeds + cash swap ----------
+{
+  let s = createGame('game-1', DUO, 1); // active = p1
+  s.phase = 'RESOLVED'; // a manage phase
+  grant(s, 'p1', [6]); // p1 owns Linux Kernel
+  grant(s, 'p2', [8]); // p2 owns Apache Node
+
+  const bad = applyAction(s, {
+    type: 'PROPOSE_TRADE', playerId: 'p2', to: 'p1',
+    offerTiles: [8], offerCash: 0, wantTiles: [6], wantCash: 0,
+  });
+  check('trade: non-active player cannot propose', bad.ok === false);
+
+  const pr = applyAction(s, {
+    type: 'PROPOSE_TRADE', playerId: 'p1', to: 'p2',
+    offerTiles: [6], offerCash: 50, wantTiles: [8], wantCash: 0,
+  });
+  check('trade: active player proposal accepted', pr.ok === true && pr.state.pendingTrade?.to === 'p2', pr.ok ? '' : pr.error);
+  if (pr.ok) s = pr.state;
+
+  const tradeId = s.pendingTrade!.id;
+  const spoof = applyAction(s, { type: 'RESOLVE_TRADE', playerId: 'p1', tradeId, accept: true });
+  check('trade: proposer cannot accept their own offer', spoof.ok === false);
+
+  const acc = applyAction(s, { type: 'RESOLVE_TRADE', playerId: 'p2', tradeId, accept: true });
+  check('trade: counterparty accepts', acc.ok === true, acc.ok ? '' : acc.error);
+  if (acc.ok) s = acc.state;
+  check('trade: deed 6 moved to p2', s.boardState[6].ownerId === 'p2');
+  check('trade: deed 8 moved to p1', s.boardState[8].ownerId === 'p1');
+  check('trade: p1 paid 50 cash (1450)', s.players['p1'].balance === 1450);
+  check('trade: p2 received 50 cash (1550)', s.players['p2'].balance === 1550);
+  check('trade: inventories updated', s.players['p1'].inventory.includes(8) && s.players['p2'].inventory.includes(6));
+  check('trade: offer cleared', s.pendingTrade === null);
+}
+
+// --- 2f. Trade: developed deeds are not tradeable; proposer can withdraw -----
+{
+  let s = createGame('game-1', DUO, 1);
+  s.phase = 'RESOLVED';
+  grant(s, 'p1', [6, 8, 9], 1); // a built monopoly
+  const dev = applyAction(s, {
+    type: 'PROPOSE_TRADE', playerId: 'p1', to: 'p2',
+    offerTiles: [6], offerCash: 0, wantTiles: [], wantCash: 0,
+  });
+  check('trade: developed deed rejected', dev.ok === false);
+
+  grant(s, 'p1', [5]); // a bare Backbone deed
+  const pr = applyAction(s, {
+    type: 'PROPOSE_TRADE', playerId: 'p1', to: 'p2',
+    offerTiles: [5], offerCash: 0, wantTiles: [], wantCash: 100,
+  });
+  if (pr.ok) s = pr.state;
+  const wd = applyAction(s, { type: 'RESOLVE_TRADE', playerId: 'p1', tradeId: s.pendingTrade!.id, accept: false });
+  check('trade: proposer can withdraw', wd.ok === true && wd.state.pendingTrade === null, wd.ok ? '' : wd.error);
+}
+
+// --- 2g. Lobby config: auctions disabled → declining leaves the tile unsold ---
+{
+  let s = createGame('game-1', DUO, 1, { auctionsEnabled: false });
+  s.phase = 'AWAIT_ACTION';
+  s.players['p1'].position = 6; // Linux Kernel (unowned)
+
+  const d = applyAction(s, { type: 'DECLINE_PROPERTY', playerId: 'p1', tile: 6 });
+  check('config: decline with auctions disabled opens no auction',
+    d.ok === true && d.state.phase !== 'AUCTION' && d.state.auction === null, d.ok ? '' : d.error);
+  if (d.ok) s = d.state;
+  check('config: declined tile stays unowned (no sale)', s.boardState[6].ownerId === null);
+  check('config: auctionsEnabled flag carried in state', s.auctionsEnabled === false);
+
+  // The same flag also short-circuits an unaffordable landing (no auction path).
+  const u = createGame('game-1', DUO, 1, { auctionsEnabled: false });
+  check('config: default games still enable auctions',
+    createGame('game-1', DUO, 1).auctionsEnabled === true && u.auctionsEnabled === false);
+}
+
+// --- 2h. Bot policy: deterministic moves for a bot-controlled seat -----------
+{
+  const isBot = (id: string): boolean => id === 'p2'; // p2 is the bot
+  const s = createGame('game-1', DUO, 1); // active = p1 (human), AWAIT_ROLL
+
+  check('bot: stays silent on a human turn', nextBotAction(s, isBot) === null);
+
+  s.activePlayerId = 'p2';
+  const roll = nextBotAction(s, isBot);
+  check('bot: rolls on its own AWAIT_ROLL', roll?.actor === 'p2' && roll?.action.type === 'ROLL_DICE');
+
+  s.phase = 'AWAIT_ACTION';
+  s.players['p2'].position = 6; // affordable property
+  const buy = nextBotAction(s, isBot);
+  check('bot: buys an affordable property', buy?.action.type === 'BUY_PROPERTY');
+
+  s.phase = 'AUCTION';
+  s.auction = { tile: 6, currentBid: 0, highBidderId: null, activeBidders: ['p2'], bidTurnId: 'p2' };
+  const bid = nextBotAction(s, isBot);
+  check('bot: bids in an auction on its turn', bid?.action.type === 'PLACE_BID');
+
+  const s2 = createGame('game-1', DUO, 1);
+  s2.pendingTrade = { id: 't', from: 'p1', to: 'p2', offerTiles: [], offerCash: 0, wantTiles: [], wantCash: 0 };
+  const dec = nextBotAction(s2, isBot);
+  check('bot: declines a trade addressed to it', dec?.actor === 'p2' && dec?.action.type === 'RESOLVE_TRADE');
 }
 
 console.log(

@@ -7,7 +7,7 @@ import { connectGateway } from '../gateway';
 import { RoomManager } from '../RoomManager';
 import { GameRoom } from '../GameRoom';
 import { InMemoryStore } from '../store';
-import { C2S, S2C, ServerLike, SocketLike, GameStateMsg, JoinedRes } from '../protocol';
+import { C2S, S2C, ServerLike, SocketLike, GameStateMsg, JoinedRes, LobbyUpdateMsg } from '../protocol';
 
 declare const process: { exit(code: number): never };
 declare const console: { log(...args: unknown[]): void };
@@ -142,6 +142,82 @@ check('single source of truth: both clients see same hash', host.last<GameStateM
 guest.send('disconnect');
 const afterDc = host.last<{ seats: { connected: boolean }[] }>(S2C.LobbyUpdate);
 check('disconnect flags seat as offline', afterDc?.seats.some((s) => !s.connected) === true);
+
+// 11. Idle sweep spares in-progress games (the main room is already started).
+{
+  const before = manager.lobbyView(roomId)?.seats.length ?? 0;
+  const kicked = manager.sweepIdle(-1); // -1 ⇒ "everything is idle"
+  check('idle sweep spares in-progress games', kicked.length === 0 && manager.lobbyView(roomId)?.seats.length === before);
+}
+
+// 12. Idle sweep evicts abandoned lobby seats and cleans up the empty room.
+{
+  const mgr = new RoomManager(new InMemoryStore());
+  const created = mgr.createRoom('Idle', 'sock-x');
+  const lobbyRoom = created.ok ? created.value.roomId : '';
+  mgr.join(lobbyRoom, 'AlsoIdle', 'sock-y');
+
+  check('fresh members survive a generous sweep', mgr.sweepIdle(1_000_000).length === 0);
+  const kicked = mgr.sweepIdle(-1);
+  check('idle members evicted from the lobby', kicked.length === 2);
+  check('emptied room is removed', mgr.lobbyView(lobbyRoom) === null);
+}
+
+// 13. Lobby config + bots: cap is enforced, config surfaces, bots add/remove.
+{
+  const io2 = new FakeIo();
+  const mgr2 = new RoomManager(new InMemoryStore(), () => 0x1234);
+  connectGateway(io2 as unknown as ServerLike, mgr2);
+  const h = new FakeSocket('bot-host', io2);
+  io2.connect(h);
+
+  h.send(C2S.CreateRoom, { name: 'Human', maxPlayers: 2, auctionsEnabled: false });
+  h.send(C2S.AddBot);
+  let lob = h.last<LobbyUpdateMsg>(S2C.LobbyUpdate)!;
+  check('addbot: a bot seat is added', lob.seats.length === 2 && lob.seats.some((s) => s.isBot));
+  check('lobby: maxPlayers + auctions config surfaced', lob.maxPlayers === 2 && lob.auctionsEnabled === false);
+
+  h.send(C2S.AddBot); // 3rd seat exceeds the cap of 2
+  check('addbot: refused once the player cap is hit', h.last<{ code: string }>(S2C.Error)?.code === 'CONFLICT');
+
+  const botId = lob.seats.find((s) => s.isBot)!.playerId;
+  h.send(C2S.RemoveBot, { botId });
+  lob = h.last<LobbyUpdateMsg>(S2C.LobbyUpdate)!;
+  check('removebot: bot seat removed', lob.seats.length === 1 && !lob.seats.some((s) => s.isBot));
+}
+
+// 14. Bot driver: a bot seat auto-plays its turn through the same authority path.
+{
+  const io3 = new FakeIo();
+  const mgr3 = new RoomManager(new InMemoryStore(), () => 0x1234);
+  connectGateway(io3 as unknown as ServerLike, mgr3); // default schedule = synchronous
+  const h = new FakeSocket('drive-host', io3);
+  io3.connect(h);
+
+  h.send(C2S.CreateRoom, { name: 'Human', auctionsEnabled: false });
+  const human = h.last<JoinedRes>(S2C.Joined)!.playerId;
+  h.send(C2S.AddBot);
+  const botId = h.last<LobbyUpdateMsg>(S2C.LobbyUpdate)!.seats.find((s) => s.isBot)!.playerId;
+  h.send(C2S.SetReady, { ready: true });
+  h.send(C2S.StartGame);
+  check('bot game: human is first to act', h.last<GameStateMsg>(S2C.GameState)?.state.activePlayerId === human);
+
+  // The human plays legal moves by phase; the bot's whole turn runs inside the
+  // human's END_TURN (synchronous schedule), so the bot soon appears in history.
+  let guard = 0;
+  while (guard++ < 300) {
+    const s = h.last<GameStateMsg>(S2C.GameState)!.state;
+    if (s.phase === 'GAME_OVER' || s.turnHistory.some((r) => r.playerId === botId)) break;
+    if (s.activePlayerId !== human) break; // safety: control should never stall on a bot
+    if (s.phase === 'AWAIT_ROLL') h.send(C2S.GameAction, { type: 'ROLL_DICE' });
+    else if (s.phase === 'AWAIT_ACTION') h.send(C2S.GameAction, { type: 'DECLINE_PROPERTY', tile: s.players[human].position });
+    else if (s.phase === 'RESOLVED') h.send(C2S.GameAction, { type: 'END_TURN' });
+    else break;
+  }
+  const fin = h.last<GameStateMsg>(S2C.GameState)!.state;
+  check('bot driver: the bot auto-played its turn', fin.turnHistory.some((r) => r.playerId === botId));
+  check('bot driver: control returned to the human', fin.phase === 'GAME_OVER' || fin.activePlayerId === human);
+}
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

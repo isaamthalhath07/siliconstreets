@@ -2,7 +2,7 @@
 // a game's state. Wraps the pure engine reducer, enforces single-writer
 // atomicity, and produces the broadcast payload for every accepted action.
 
-import { GameAction, GameState, PlayerId } from '../engine/types';
+import { GameAction, GameConfig, GameState, PlayerId } from '../engine/types';
 import { createGame } from '../engine/state';
 import { applyAction } from '../engine/reducer';
 import { GameStateMsg } from './protocol';
@@ -31,9 +31,9 @@ export class GameRoom {
 
   /** Build the authoritative initial state. Seed defaults to gameId-derived
    *  (deterministic); pass an explicit seed for reproducible test games. */
-  start(seats: Seat[], seed?: number): GameStateMsg {
+  start(seats: Seat[], seed?: number, config?: GameConfig): GameStateMsg {
     if (this.state) throw new Error('game already started');
-    this.state = createGame(this.roomId, seats, seed);
+    this.state = createGame(this.roomId, seats, seed, config);
     void this.store.saveGame(this.roomId, this.state);
     return this.snapshot([`game started with ${seats.length} players`]);
   }

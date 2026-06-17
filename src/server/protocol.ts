@@ -12,10 +12,13 @@ export const C2S = {
   JoinRoom: 'lobby:join',
   SetReady: 'lobby:ready',
   StartGame: 'lobby:start',
+  AddBot: 'lobby:addbot',     // host fills an open seat with a bot
+  RemoveBot: 'lobby:removebot', // host removes a previously added bot
   GameAction: 'game:action',
   Chat: 'chat:send',          // text chat message
   Voice: 'voice:signal',      // WebRTC signaling relay (offer/answer/ICE)
   VoicePresence: 'voice:set', // announce mic on/off
+  Heartbeat: 'presence:ping', // liveness ping emitted on user activity
 } as const;
 
 export const S2C = {
@@ -25,14 +28,22 @@ export const S2C = {
   Chat: 'chat:msg',           // broadcast chat line
   Voice: 'voice:signal',      // relayed WebRTC signal (clients filter by `to`)
   VoicePresence: 'voice:set', // a peer toggled their mic
+  Kicked: 'lobby:kicked',     // a member was removed (e.g. for inactivity)
   Error: 'error',
 } as const;
 
 // --- payloads --------------------------------------------------------------
 
-export interface CreateRoomReq { name: string }
+export interface CreateRoomReq {
+  name: string;
+  /** Player cap (2-8). Defaults to 8 when omitted. */
+  maxPlayers?: number;
+  /** Whether property auctions are enabled. Defaults to true. */
+  auctionsEnabled?: boolean;
+}
 export interface JoinRoomReq { roomId: string; name: string }
 export interface SetReadyReq { ready: boolean }
+export interface RemoveBotReq { botId: PlayerId }
 
 export interface JoinedRes {
   roomId: string;
@@ -44,12 +55,18 @@ export interface LobbySeatView {
   name: string;
   ready: boolean;
   connected: boolean;
+  /** True for AI-controlled seats added by the host. */
+  isBot: boolean;
 }
 
 export interface LobbyUpdateMsg {
   roomId: string;
   hostId: PlayerId;
   started: boolean;
+  /** Player cap chosen at creation. */
+  maxPlayers: number;
+  /** Whether auctions are enabled for this room. */
+  auctionsEnabled: boolean;
   seats: LobbySeatView[];
 }
 
@@ -89,6 +106,12 @@ export interface VoicePresenceMsg {
   active: boolean;
 }
 
+/** Sent to a room when the server evicts a member (idle timeout). */
+export interface KickedMsg {
+  playerId: PlayerId;
+  reason: string;
+}
+
 export type ClientAction = GameAction; // re-export for the gateway boundary
 
 // --- transport abstraction (structural subset of socket.io) ----------------
@@ -102,6 +125,8 @@ export interface SocketLike {
   emit(event: string, payload: unknown): void;
   on(event: string, handler: (payload: unknown) => void): void;
   on(event: 'disconnect', handler: () => void): void;
+  /** socket.io's catch-all listener; optional so fake transports can omit it. */
+  onAny?(handler: (event: string, ...args: unknown[]) => void): void;
 }
 
 export interface ServerLike {

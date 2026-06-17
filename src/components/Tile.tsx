@@ -44,10 +44,11 @@ export default function Tile({ tile, ts, ownerColor, tokens, style }: TileProps)
     <div
       style={{
         ...style,
-        borderColor: ownerColor ?? 'rgba(255,255,255,0.08)',
-        boxShadow: ownerColor ? `inset 0 0 10px ${ownerColor}55` : undefined,
+        boxShadow: ownerColor
+          ? `inset 0 0 0 2px ${ownerColor}cc, 3px 3px 7px rgba(8,10,22,0.55), -2px -2px 6px rgba(255,255,255,0.04)`
+          : '3px 3px 7px rgba(8,10,22,0.5), -2px -2px 6px rgba(255,255,255,0.045)',
       }}
-      className="relative flex flex-col items-center justify-center overflow-hidden rounded-[5px] border bg-white/[0.03] p-0.5 text-center backdrop-blur-sm transition-colors hover:bg-white/[0.07]"
+      className="tile3d relative flex flex-col items-center justify-center overflow-hidden rounded-[10px] bg-[#272c46] p-0.5 text-center transition-transform hover:scale-[1.04]"
     >
       {isOwnable(tile) && (
         <span className={`absolute ${BAR_SIDE[edgeOf(tile.index)]}`} style={{ background: SECTOR_COLOR[tile.sector], boxShadow: `0 0 6px ${SECTOR_COLOR[tile.sector]}` }} />
@@ -72,14 +73,20 @@ export default function Tile({ tile, ts, ownerColor, tokens, style }: TileProps)
       )}
 
       {tokens.length > 0 && (
-        <span className="mt-0.5 flex flex-wrap items-center justify-center gap-0.5">
+        <span className="mt-0.5 flex flex-wrap items-center justify-center gap-1">
           {tokens.map((t, i) => (
             <span
               key={i}
               title={t.initial}
-              style={{ background: t.color }}
-              className={`inline-flex h-2.5 w-2.5 items-center justify-center rounded-full text-[6px] font-bold text-black ${
-                t.active ? 'ring-1 ring-white' : ''
+              style={{
+                background: `radial-gradient(circle at 34% 26%, #ffffff, ${t.color} 58%, ${t.color}aa)`,
+                boxShadow: t.active
+                  ? `0 5px 7px rgba(0,0,0,0.55), 0 0 12px ${t.color}, 0 0 4px #fff`
+                  : `0 4px 6px rgba(0,0,0,0.5), 0 0 8px ${t.color}99`,
+                transform: 'rotateX(-17deg)',
+              }}
+              className={`inline-flex h-[22px] w-[22px] items-center justify-center rounded-full text-[11px] font-extrabold text-black/80 ${
+                t.active ? 'animate-ring ring-2 ring-white' : ''
               }`}
             >
               {t.initial}

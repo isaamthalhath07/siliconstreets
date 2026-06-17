@@ -72,6 +72,7 @@ export function setPostActionPhase(state: GameState): void {
 
 /** Rotate to the next solvent player, or end the game if only one remains. */
 export function advanceTurn(state: GameState): void {
+  state.pendingTrade = null; // an unresolved offer expires when the turn passes
   const survivors = nonBankrupt(state);
   if (survivors.length <= 1) {
     state.phase = 'GAME_OVER';
@@ -97,6 +98,10 @@ export function startAuction(state: GameState, events: string[]): void {
   const def = BOARD[tile];
   if (!isOwnable(def) || state.boardState[tile].ownerId) {
     return setPostActionPhase(state); // nothing to auction
+  }
+  if (!state.auctionsEnabled) {
+    events.push(`${def.name} stays unclaimed (auctions disabled)`);
+    return setPostActionPhase(state);
   }
   const bidders = state.playerOrder.filter((id) => !state.players[id].isBankrupt);
   if (bidders.length === 0) return setPostActionPhase(state);

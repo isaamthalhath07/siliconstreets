@@ -27,6 +27,7 @@ import {
   transfer,
 } from './movement';
 import { placeBid, passBid } from './auction';
+import { proposeTrade, resolveTrade } from './trade';
 
 const active = (s: GameState): Player => s.players[s.activePlayerId];
 
@@ -34,6 +35,7 @@ const active = (s: GameState): Player => s.players[s.activePlayerId];
 const ACTIVE_ONLY = new Set<GameAction['type']>([
   'ROLL_DICE', 'BUY_PROPERTY', 'DECLINE_PROPERTY', 'BUILD', 'SELL_BUILDING',
   'MORTGAGE', 'UNMORTGAGE', 'PAY_BAIL', 'END_TURN', 'DECLARE_BANKRUPTCY',
+  'PROPOSE_TRADE', // only the active player may open a negotiation
 ]);
 
 export function applyAction(state: GameState, action: GameAction): ActionResult {
@@ -76,9 +78,8 @@ function route(s: GameState, a: GameAction, ev: string[]): void {
     case 'DECLARE_BANKRUPTCY': return bankruptcyAction(s, ev);
     case 'PLACE_BID': return placeBid(s, a.playerId, a.amount, ev);
     case 'PASS_BID': return passBid(s, a.playerId, ev);
-    case 'PROPOSE_TRADE':
-    case 'RESOLVE_TRADE':
-      return fail(`${a.type} not yet implemented`);
+    case 'PROPOSE_TRADE': return proposeTrade(s, a, ev);
+    case 'RESOLVE_TRADE': return resolveTrade(s, a.playerId, a.tradeId, a.accept, ev);
     default:
       return fail('unknown action');
   }

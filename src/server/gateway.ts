@@ -4,6 +4,7 @@
 // independently enforces turn order and every rule beneath this layer.
 
 import { GameAction } from '../engine/types';
+import { nextBotAction } from '../engine/bot';
 import { RoomManager } from './RoomManager';
 import {
   C2S, S2C, SocketLike, ServerLike,
@@ -15,8 +16,19 @@ const asObj = (p: unknown): Record<string, unknown> | null =>
   typeof p === 'object' && p !== null ? (p as Record<string, unknown>) : null;
 
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
 
-export function connectGateway(io: ServerLike, manager: RoomManager): void {
+/** Optional wiring so bot turns can be paced. `schedule` defaults to running
+ *  synchronously (handy for tests); bootstrap supplies a setTimeout-backed one. */
+export interface GatewayOpts {
+  schedule?: (fn: () => void, ms: number) => void;
+  botDelayMs?: number;
+}
+
+export function connectGateway(io: ServerLike, manager: RoomManager, opts: GatewayOpts = {}): void {
+  const schedule = opts.schedule ?? ((fn) => fn());
+  const botDelayMs = opts.botDelayMs ?? 0;
+
   const fail = (socket: SocketLike, code: ErrorMsg['code'], message: string): void =>
     socket.emit(S2C.Error, { code, message } satisfies ErrorMsg);
 
@@ -25,11 +37,42 @@ export function connectGateway(io: ServerLike, manager: RoomManager): void {
     if (view) io.to(roomId).emit(S2C.LobbyUpdate, view);
   };
 
+  // Drive any bot-controlled seat. Each accepted bot move broadcasts a fresh
+  // snapshot, then re-checks for the next one — so a bot's whole turn (and any
+  // following bots) play out one paced step at a time. Stops the moment control
+  // returns to a human or the game ends.
+  const driveBots = (roomId: string): void => {
+    const snap = manager.snapshot(roomId);
+    if (!snap) return;
+    const isBot = (id: string): boolean => manager.isBot(roomId, id);
+    if (!nextBotAction(snap.state, isBot)) return; // nothing for a bot to do
+    schedule(() => {
+      const cur = manager.snapshot(roomId);
+      if (!cur) return;
+      const move = nextBotAction(cur.state, (id) => manager.isBot(roomId, id));
+      if (!move) return;
+      const res = manager.dispatch(roomId, { ...move.action, playerId: move.actor } as GameAction);
+      if (!res.ok) return; // defensive: a rejected bot move just halts the chain
+      io.to(roomId).emit(S2C.GameState, res.message);
+      driveBots(roomId);
+    }, botDelayMs);
+  };
+
   io.on('connection', (socket: SocketLike) => {
+    // Any inbound event counts as activity (resets the idle clock); clients also
+    // emit a lightweight Heartbeat on user interaction. `onAny` is optional, so a
+    // dedicated Heartbeat handler keeps liveness working on transports without it.
+    socket.onAny?.(() => manager.touch(socket.id));
+    socket.on(C2S.Heartbeat, () => manager.touch(socket.id));
+
     socket.on(C2S.CreateRoom, (payload) => {
-      const name = str(asObj(payload)?.name);
+      const body = asObj(payload);
+      const name = str(body?.name);
       if (!name) return fail(socket, 'BAD_REQUEST', 'name is required');
-      const res = manager.createRoom(name, socket.id);
+      const res = manager.createRoom(name, socket.id, {
+        maxPlayers: num(body?.maxPlayers),
+        auctionsEnabled: body?.auctionsEnabled !== false,
+      });
       if (!res.ok) return fail(socket, 'CONFLICT', res.error);
       bind(socket, res.value.roomId, res.value.playerId);
       socket.emit(S2C.Joined, res.value);
@@ -64,6 +107,26 @@ export function connectGateway(io: ServerLike, manager: RoomManager): void {
       if (!res.ok) return fail(socket, 'CONFLICT', res.error);
       pushLobby(ctx.roomId);
       io.to(ctx.roomId).emit(S2C.GameState, res.value);
+      driveBots(ctx.roomId); // first player may be a bot
+    });
+
+    // Host fills an empty seat with an AI player (always ready).
+    socket.on(C2S.AddBot, () => {
+      const ctx = ctxOf(socket);
+      if (!ctx) return fail(socket, 'FORBIDDEN', 'join a room first');
+      const res = manager.addBot(ctx.roomId, ctx.playerId);
+      if (!res.ok) return fail(socket, 'CONFLICT', res.error);
+      pushLobby(ctx.roomId);
+    });
+
+    socket.on(C2S.RemoveBot, (payload) => {
+      const ctx = ctxOf(socket);
+      if (!ctx) return fail(socket, 'FORBIDDEN', 'join a room first');
+      const botId = str(asObj(payload)?.botId);
+      if (!botId) return fail(socket, 'BAD_REQUEST', 'botId is required');
+      const res = manager.removeBot(ctx.roomId, ctx.playerId, botId);
+      if (!res.ok) return fail(socket, 'CONFLICT', res.error);
+      pushLobby(ctx.roomId);
     });
 
     socket.on(C2S.GameAction, (payload) => {
@@ -77,6 +140,7 @@ export function connectGateway(io: ServerLike, manager: RoomManager): void {
       const res = manager.dispatch(ctx.roomId, stamped);
       if (!res.ok) return fail(socket, 'RULE_VIOLATION', res.error);
       io.to(ctx.roomId).emit(S2C.GameState, res.message);
+      driveBots(ctx.roomId); // a human action may hand control to bot(s)
     });
 
     // --- text chat: validate, stamp identity server-side, broadcast --------
