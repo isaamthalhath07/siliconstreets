@@ -20,6 +20,9 @@ export type LinkState = RTCPeerConnectionState | 'idle';
 interface Peer {
   pc: RTCPeerConnection;
   audio: HTMLAudioElement;
+  /** ICE candidates that arrived before the remote description was set. WebRTC
+   *  rejects addIceCandidate() until then, so we buffer and flush afterwards. */
+  pendingCandidates: RTCIceCandidateInit[];
 }
 
 export interface UseVoice {
@@ -87,7 +90,7 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
         if (e.candidate) socket.emit(C2S.Voice, { to: id, data: { candidate: e.candidate } });
       };
       pc.onconnectionstatechange = () => setLink(id, pc.connectionState);
-      const peer: Peer = { pc, audio };
+      const peer: Peer = { pc, audio, pendingCandidates: [] };
       peers.current.set(id, peer);
       setLink(id, pc.connectionState);
       if (initiator) {
@@ -111,17 +114,31 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
       const data = m.data as { sdp?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit };
       try {
         if (data.sdp) {
+          // An incoming offer needs a peer to answer with; an answer lands on the
+          // peer we already created as the initiator.
           if (data.sdp.type === 'offer') makePeer(m.from, false);
-          const pc = peers.current.get(m.from)?.pc;
-          if (!pc) return;
-          await pc.setRemoteDescription(data.sdp);
+          const peer = peers.current.get(m.from);
+          if (!peer) return;
+          await peer.pc.setRemoteDescription(data.sdp);
+          // Remote description is set — drain any candidates that raced ahead.
+          const buffered = peer.pendingCandidates.splice(0);
+          for (const c of buffered) {
+            await peer.pc.addIceCandidate(c).catch(() => undefined);
+          }
           if (data.sdp.type === 'offer') {
-            const ans = await pc.createAnswer();
-            await pc.setLocalDescription(ans);
-            socket.emit(C2S.Voice, { to: m.from, data: { sdp: pc.localDescription } });
+            const ans = await peer.pc.createAnswer();
+            await peer.pc.setLocalDescription(ans);
+            socket.emit(C2S.Voice, { to: m.from, data: { sdp: peer.pc.localDescription } });
           }
         } else if (data.candidate) {
-          await peers.current.get(m.from)?.pc.addIceCandidate(data.candidate);
+          const peer = peers.current.get(m.from);
+          if (!peer) return;
+          // Only addable once a remote description exists; otherwise buffer it.
+          if (peer.pc.remoteDescription && peer.pc.remoteDescription.type) {
+            await peer.pc.addIceCandidate(data.candidate);
+          } else {
+            peer.pendingCandidates.push(data.candidate);
+          }
         }
       } catch {
         /* transient negotiation races are recoverable; ignore */
@@ -153,6 +170,7 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
   // --- controls --------------------------------------------------------------
   const toggleVoice = useCallback(async () => {
     if (enabledRef.current) {
+      enabledRef.current = false; // synchronous: stop accepting signals immediately
       socket?.emit(C2S.VoicePresence, { active: false });
       peers.current.forEach((_, id) => closePeer(id));
       stream.current?.getTracks().forEach((t) => t.stop());
@@ -163,6 +181,9 @@ export function useVoice(socket: Socket | null, me: string | null): UseVoice {
     }
     try {
       stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Flip the ref before announcing so offers/answers that arrive on the next
+      // tick aren't dropped by the enabled-guard (state updates only on re-render).
+      enabledRef.current = true;
       setEnabled(true);
       setError(null);
       socket?.emit(C2S.VoicePresence, { active: true }); // announce + discover
