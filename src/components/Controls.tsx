@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import type { GameAction, GameState } from '@/engine/types';
+import type { GameState, PlayerAction } from '@/engine/types';
 import { isOwnable } from '@/engine/types';
 import { BOARD } from '@/engine/board';
 
@@ -9,7 +9,7 @@ interface ControlsProps {
   state: GameState;
   me: string | null;
   error: string | null;
-  dispatch: (action: Omit<GameAction, 'playerId'>) => void;
+  dispatch: (action: PlayerAction) => void;
 }
 
 function Btn({ onClick, children, tone = 'matrix' }: { onClick: () => void; children: ReactNode; tone?: 'matrix' | 'cyber' | 'red' }) {

@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { applyAction } from '@/engine/reducer';
-import type { GameAction } from '@/engine/types';
+import type { GameAction, PlayerAction } from '@/engine/types';
 import {
   C2S, S2C,
   type GameStateMsg, type JoinedRes, type LobbyUpdateMsg, type ErrorMsg,
@@ -29,7 +29,7 @@ export interface UseGame {
   setReady: (ready: boolean) => void;
   start: () => void;
   /** Submit an action; playerId is stamped server-side, so omit it here. */
-  dispatch: (action: Omit<GameAction, 'playerId'>) => void;
+  dispatch: (action: PlayerAction) => void;
 }
 
 export function useGameState(): UseGame {
@@ -82,7 +82,7 @@ export function useGameState(): UseGame {
   const setReady = useCallback((ready: boolean) => emit(C2S.SetReady, { ready }), []);
   const start = useCallback(() => emit(C2S.StartGame), []);
 
-  const dispatch = useCallback((partial: Omit<GameAction, 'playerId'>) => {
+  const dispatch = useCallback((partial: PlayerAction) => {
     setError(null);
     const current = authRef.current;
     const pid = meRef.current;

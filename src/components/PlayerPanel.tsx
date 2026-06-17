@@ -1,6 +1,6 @@
 'use client';
 
-import type { GameAction, GameState } from '@/engine/types';
+import type { GameState, PlayerAction } from '@/engine/types';
 import { TileType } from '@/engine/types';
 import { BOARD } from '@/engine/board';
 import { TOKEN_COLORS } from './boardLayout';
@@ -9,7 +9,7 @@ interface PanelProps {
   state: GameState;
   me: string | null;
   events: string[];
-  dispatch: (action: Omit<GameAction, 'playerId'>) => void;
+  dispatch: (action: PlayerAction) => void;
 }
 
 export default function PlayerPanel({ state, me, events, dispatch }: PanelProps) {
