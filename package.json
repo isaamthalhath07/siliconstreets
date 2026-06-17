@@ -1,0 +1,33 @@
+{
+  "name": "silicon-streets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tech-themed real-time board game — deterministic engine + Socket.io authority + Next.js UI",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "server": "tsx src/server/bootstrap.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.engine.json",
+    "test:engine": "tsx src/engine/__tests__/determinism.test.ts",
+    "test:server": "tsx src/server/__tests__/gateway.test.ts",
+    "test": "npm run test:engine && npm run test:server"
+  },
+  "dependencies": {
+    "next": "^14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
